@@ -1,8 +1,13 @@
 # grokdrive
 
+> **Unofficial** — not affiliated with xAI. Best-effort; the Grok Build CLI's flags
+> and output shape may change and can break dispatch.
+
 **Grok does the work. Claude keeps the judgment.**
 
-Session-scoped "burn Grok credit" mode for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). When ON, Grok 4.5 (via the Grok Build CLI, headless) does all execution while the Claude session model (Opus / Fable) stays the advisor-orchestrator: it plans, routes, writes specs, reviews, and verifies — but never hand-edits work files. The package is a small Claude Code extension: a dispatcher CLI, a hard PreToolUse gate hook, and a doctrine skill.
+Session-scoped "burn Grok credit" mode for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). When ON, the Grok Build CLI's current default model (Grok 4.5 at time of writing), headless, does all execution while the Claude session model (Opus / Fable) stays the advisor-orchestrator: it plans, routes, writes specs, reviews, and verifies — but does not use Claude's native edit tools on work files. The package is a small Claude Code extension: a dispatcher CLI, a PreToolUse gate on Claude's four mutation tools, and a doctrine skill.
+
+This is a **hard gate on Claude's native edit tools + strong friction/discipline — not a sandbox.**
 
 ## How it works
 
@@ -13,6 +18,15 @@ grokdrive "<self-contained spec>"
 ```
 
 which dispatches the spec to Grok. Effort auto-tiers (HIGH for complex specs, MEDIUM for standard). Each dispatch writes a raw artifact; `verify --gate "<cmd>"` produces a GREEN / RED verdict marker. Kill the mode with `grokdrive off` or `CLAUDE_GUARDS_OFF=1`.
+
+### What the gate does and doesn't stop
+
+| | |
+|-|-|
+| **Stops** | Direct Claude `Write` / `Edit` / `MultiEdit` / `NotebookEdit` on non-allowlisted paths |
+| **Does NOT stop** | Bash-based file writes (`printf >f`, `cat <<EOF >f`, `sed -i`, `tee`, `git apply`, …), MCP writes, or writes by spawned sub-agents |
+
+Bash, MCP, and sub-agent writes are governed by the skill doctrine, not the hook. If you need a harder boundary, run Grok in a sandbox/worktree and treat `--always-approve` accordingly.
 
 ## Requirements
 
@@ -104,7 +118,7 @@ GREEN iff the gate exits 0. `--loop <mode>` also stamps that loop's verifier mar
 | Variable | Default | Meaning |
 |-|-|-|
 | `GROKDRIVE_EFFORT` | `auto` | `auto` \| `high` \| `medium` \| `low` |
-| `GROKDRIVE_MODEL` | empty | Empty = Grok default 4.5 |
+| `GROKDRIVE_MODEL` | empty | Empty = Grok Build CLI default (Grok 4.5 at time of writing) |
 | `GROKDRIVE_MAX_TURNS` | `60` | Max turns per dispatch |
 | `GROKDRIVE_TIMEOUT` | `1200` | Dispatch timeout (seconds) |
 | `GROKDRIVE_SANDBOX` | empty | Passed through to `grok` when set |
@@ -118,7 +132,7 @@ GREEN iff the gate exits 0. `--loop <mode>` also stamps that loop's verifier mar
 - **Always allowed** while active: trivial edits ≤ `GROKDRIVE_TRIVIAL_LINES` (default 20); paths under `~/.claude/**`, `~/.local/bin/**`, `/tmp/claude-*`.
 - **Kill-switch:** `CLAUDE_GUARDS_OFF=1` or `grokdrive off`.
 - **Fail-soft:** any hook error is a no-op (never wedges a tool call).
-- Only the four mutation tools are gated; Read / Grep / Glob / Bash stay free so the advisor can inspect and invoke `grokdrive`.
+- Only the four mutation tools are gated; Read / Grep / Glob / Bash stay free so the advisor can inspect and invoke `grokdrive`. Bash-based file writes are a deliberate escape hatch (see [What the gate does and doesn't stop](#what-the-gate-does-and-doesnt-stop)).
 
 ## Uninstall
 

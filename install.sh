@@ -299,7 +299,7 @@ PY
 
 # ---- main ----
 if [[ "$UNINSTALL" -eq 1 ]]; then
-  log "grokdrive uninstall (repo: $REPO_ROOT)${DRY_RUN:+ [dry-run]}"
+  log "grokdrive uninstall (repo: $REPO_ROOT)$( [[ $DRY_RUN -eq 1 ]] && printf ' [dry-run]' )"
   log "Removing symlinks (only if they point into this repo):"
   safe_unlink "$BIN_DST"
   safe_unlink "$HOOK_DST"
@@ -310,7 +310,7 @@ if [[ "$UNINSTALL" -eq 1 ]]; then
   exit 0
 fi
 
-log "grokdrive install (repo: $REPO_ROOT)${DRY_RUN:+ [dry-run]}"
+log "grokdrive install (repo: $REPO_ROOT)$( [[ $DRY_RUN -eq 1 ]] && printf ' [dry-run]' )"
 
 # Preflight: warn if grok CLI missing
 if ! command -v grok >/dev/null 2>&1; then

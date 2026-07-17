@@ -1,19 +1,26 @@
 ---
 name: grokdrive
 description: >
-  Burn-Grok-credit mode — route ALL execution and heavy sub-agent work to Grok 4.5
-  (Grok Build CLI, effort high/medium), keeping the Claude session model (Opus/Fable)
-  as advisor-orchestrator only: it plans, routes, reviews, verifies, never edits.
-  A hard PreToolUse gate blocks direct Claude Write/Edit while active. Use on
-  /grokdrive, "grokdrive", "grok mode", "burn grok credit", "route execution to grok",
-  "grok body", or when the user wants Grok doing the work and Claude just orchestrating.
+  Burn-Grok-credit mode — route ALL execution and heavy sub-agent work to the
+  Grok Build CLI's current default model (Grok 4.5 at time of writing; effort
+  high/medium), keeping the Claude session model (Opus/Fable) as
+  advisor-orchestrator only: it plans, routes, reviews, verifies, never uses
+  the native edit tools on work files. A PreToolUse gate blocks direct Claude
+  Write/Edit/MultiEdit/NotebookEdit while active (Bash remains a deliberate
+  escape hatch). Use on /grokdrive, "grokdrive", "grok mode", "burn grok
+  credit", "route execution to grok", "grok body", or when the user wants Grok
+  doing the work and Claude just orchestrating.
 ---
 
-# grokdrive — Grok-4.5 body, Claude brain
+# grokdrive — Grok body, Claude brain
 
-Flip a session-scoped mode where **Grok 4.5 does the work** and the **Claude session
-model (Opus or Fable) only orchestrates**. Built to spend Grok credit while keeping
-Claude's judgment on plan / route / review / verify.
+Flip a session-scoped mode where **Grok does the work** (via the Grok Build
+CLI's current default model — Grok 4.5 at time of writing) and the **Claude
+session model (Opus or Fable) only orchestrates**. Built to spend Grok credit
+while keeping Claude's judgment on plan / route / review / verify.
+
+This is a **hard gate on Claude's four mutation tools + strong friction/
+discipline — not a sandbox.**
 
 **Status line — lead every reply while active:**
 
@@ -35,14 +42,27 @@ grokdrive status
 grokdrive off                      # restore direct Claude execution
 ```
 
-`on` arms a hard gate: while active, the `grokdrive-gate.js` PreToolUse hook **blocks
-direct Claude Write/Edit/MultiEdit/NotebookEdit** in the project. You physically cannot
-hand-edit work files — that is the point. Kill-switch: `grokdrive off` or
+`on` arms a hard gate **on Claude's four mutation tools**: while active, the
+`grokdrive-gate.js` PreToolUse hook **blocks direct Claude
+Write/Edit/MultiEdit/NotebookEdit** on non-allowlisted project paths. Direct
+Claude edits via those mutation tools are blocked; Bash writes remain a
+deliberate escape hatch (see Limits). Kill-switch: `grokdrive off` or
 `CLAUDE_GUARDS_OFF=1`.
 
 **Allowed even while active** (so the mode stays usable): trivial edits ≤20 changed lines
 (`GROKDRIVE_TRIVIAL_LINES`, set 0 for no exceptions), and edits under `~/.claude/**`,
 `~/.local/bin/**`, `/tmp/claude-**` (advisor/config/scratch territory).
+
+### Limits — what the gate does and doesn't stop
+
+| | |
+|-|-|
+| **Stops** | Direct Claude `Write` / `Edit` / `MultiEdit` / `NotebookEdit` on non-allowlisted paths |
+| **Does NOT stop** | Bash-based file writes, MCP writes, or writes by spawned sub-agents |
+
+Those unstopped paths are governed by this skill's doctrine, not the hook. If
+you need a harder boundary, run Grok in a sandbox/worktree and treat
+`--always-approve` accordingly.
 
 **Activation scope (important):** the gate is a **PreToolUse hook**, and Claude Code loads
 its hook set at **session start**. So it enforces in every session that began *after* the
@@ -120,13 +140,14 @@ grokdrive doctor    # grok on PATH, state writable, gate hook present + register
 
 ## Env knobs
 
-`GROKDRIVE_EFFORT` (auto|high|medium|low) · `GROKDRIVE_MODEL` (empty = Grok default 4.5) ·
-`GROKDRIVE_MAX_TURNS` (60) · `GROKDRIVE_TIMEOUT` (1200s) · `GROKDRIVE_SANDBOX` ·
-`GROKDRIVE_TRIVIAL_LINES` (20) · `CLAUDE_GUARDS_OFF=1` disables the gate.
+`GROKDRIVE_EFFORT` (auto|high|medium|low) · `GROKDRIVE_MODEL` (empty = Grok Build CLI
+default; Grok 4.5 at time of writing) · `GROKDRIVE_MAX_TURNS` (60) ·
+`GROKDRIVE_TIMEOUT` (1200s) · `GROKDRIVE_SANDBOX` · `GROKDRIVE_TRIVIAL_LINES` (20) ·
+`CLAUDE_GUARDS_OFF=1` disables the gate.
 
 ## Doctrine
 
-- **Grok executes, Claude orchestrates.** The session model plans, routes, reviews, verifies — it does not hand-edit work files while the mode is on.
+- **Grok executes, Claude orchestrates.** The session model plans, routes, reviews, verifies — it does not use the four mutation tools on work files while the mode is on (Bash remains an intentional escape hatch).
 - **Route effort by difficulty** — don't burn HIGH on trivia; auto-tiering handles the common case.
 - **Never trust a summary card** — verify against the raw diff + gate stdout.
 - **One status line per reply** — mode, advisor, goal, verifier state at a glance.

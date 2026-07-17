@@ -1,6 +1,8 @@
 # Runtime / agent state
 .omc/
+.omx/
 .grokdrive-state/
+.buildlog/
 *.log
 
 # Dependencies
