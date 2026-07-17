@@ -1,0 +1,16 @@
+# Runtime / agent state
+.omc/
+.grokdrive-state/
+*.log
+
+# Dependencies
+node_modules/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
