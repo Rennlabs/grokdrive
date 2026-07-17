@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Burn-Grok-credit mode for Claude Code — Grok 4.5 executes, Claude orchestrates, a hard PreToolUse gate enforces the split.",
   "author": { "name": "Renn Labs" },
-  "homepage": "https://github.com/Renn-Labs/grokdrive",
+  "homepage": "https://github.com/Rennlabs/grokdrive",
   "license": "MIT",
   "keywords": ["claude-code", "grok", "orchestration", "hooks", "skill"]
 }

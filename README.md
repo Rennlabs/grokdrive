@@ -27,7 +27,7 @@ which dispatches the spec to Grok. Effort auto-tiers (HIGH for complex specs, ME
 ## Install
 
 ```bash
-git clone https://github.com/Renn-Labs/grokdrive.git
+git clone https://github.com/Rennlabs/grokdrive.git
 cd grokdrive
 ./install.sh
 ```
