@@ -197,13 +197,16 @@ if not os.path.isfile(settings_path):
     print(f"  created {settings_path}")
 
 with open(settings_path, "r", encoding="utf-8") as f:
-    try:
-        data = json.load(f)
-    except json.JSONDecodeError:
-        data = {}
+    raw = f.read()
+try:
+    data = json.loads(raw) if raw.strip() else {}
+except json.JSONDecodeError as e:
+    print(f"ERROR: {settings_path} is not valid JSON ({e}). Fix or restore from backup; refusing to overwrite.", file=sys.stderr)
+    sys.exit(1)
 
 if not isinstance(data, dict):
-    data = {}
+    print(f"ERROR: {settings_path} root must be a JSON object; refusing to overwrite.", file=sys.stderr)
+    sys.exit(1)
 
 hooks = data.setdefault("hooks", {})
 if not isinstance(hooks, dict):

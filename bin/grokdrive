@@ -310,17 +310,29 @@ cmd_run() {
 cmd_parallel() {
   [[ $# -ge 1 ]] || _die "parallel needs >=1 spec"
   _have grok || _die "grok not on PATH"
+  # Same refuse path as _dispatch (do not hard-code --always-approve without the gate).
+  if [[ "$ALWAYS_APPROVE" != "1" && "$ALWAYS_APPROVE" != "true" && "$ALWAYS_APPROVE" != "yes" ]]; then
+    _die "GROKDRIVE_ALWAYS_APPROVE is off — refusing parallel headless Grok dispatch"
+  fi
   local pids=() outs=() i=0 adir; adir="$(_artifact_dir)"
   for spec in "$@"; do
     local eff out; eff="$(_effort_for "$spec")"; out="$adir/$(_stamp)-par$i.md"
     ( PROMPT="$spec"; PROMPT_FILE=""
-      { echo "# grokdrive parallel #$i (effort=$eff) — $(_now)"; echo "spec: $spec"; echo "---"; } >"$out"
-      timeout "$TIMEOUT" grok --output-format plain --always-approve --max-turns "$MAX_TURNS" --effort "$eff" \
-        ${MODEL:+-m "$MODEL"} -p "$spec" </dev/null 2>/dev/null | tee -a "$out" >/dev/null
+      # Reuse _dispatch so always-approve / audit / model flags stay consistent.
+      # Subshell: write artifact path via redirected run
+      {
+        echo "# grokdrive parallel #$i (effort=$eff) — $(_now)"
+        echo "spec: $spec"
+        echo "---"
+      } >"$out"
+      local args=(--output-format plain --always-approve --max-turns "$MAX_TURNS" --effort "$eff")
+      [[ -n "$MODEL" ]] && args+=(-m "$MODEL")
+      [[ -n "$SANDBOX" ]] && args+=(--sandbox "$SANDBOX")
+      timeout "$TIMEOUT" grok "${args[@]}" -p "$spec" </dev/null 2>/dev/null | tee -a "$out" >/dev/null
     ) & pids+=($!); outs+=("$out"); i=$((i+1))
   done
   local j=0
-  for pid in "${pids[@]}"; do wait "$pid"; _bump_dispatch; j=$((j+1)); done
+  for pid in "${pids[@]}"; do wait "$pid"; _bump_dispatch; _audit dispatch label="parallel" effort="auto"; j=$((j+1)); done
   for out in "${outs[@]}"; do echo "===== ${out##*/} ====="; cat "$out"; echo; done
 }
 

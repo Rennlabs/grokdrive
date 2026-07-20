@@ -2,6 +2,11 @@
 
 ## [0.2.0] - 2026-07-20
 
+### Security
+
+- `parallel` honors `GROKDRIVE_ALWAYS_APPROVE` refuse path
+- Abort install on invalid settings.json (never wipe to `{}`)
+
 ### Added
 
 - `explain`, `log`, `version` subcommands
