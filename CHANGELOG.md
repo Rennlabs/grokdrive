@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2026-07-20
+
+### Added
+
+- `explain`, `log`, `version` subcommands
+- Status/doctor print **not-a-sandbox** boundary + session-restart honesty
+- Append-only audit log; gate denials logged from the PreToolUse hook
+- `GROKDRIVE_ALWAYS_APPROVE` (default 1; set 0 to refuse headless dispatches)
+- Installer `--force` (backup foreign files)
+
+### Changed
+
+- `on` / `status` / `doctor` surface boundary and restart caveats in-product
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

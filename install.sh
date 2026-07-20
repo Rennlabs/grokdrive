@@ -8,6 +8,7 @@
 #   ./install.sh              # install (idempotent)
 #   ./install.sh --dry-run    # print actions, mutate nothing
 #   ./install.sh --uninstall  # reverse install
+#   ./install.sh --force      # backup foreign files then replace
 #   ./install.sh -h|--help
 set -euo pipefail
 
@@ -36,6 +37,7 @@ HOOK_MATCHER="Write|Edit|MultiEdit|NotebookEdit"
 
 DRY_RUN=0
 UNINSTALL=0
+FORCE=0
 
 usage() {
   cat <<'EOF'
@@ -46,10 +48,13 @@ Install grokdrive (CLI, PreToolUse gate hook, doctrine skill) for Claude Code.
 Options:
   --dry-run     Print every action; mutate nothing
   --uninstall   Remove symlinks and the PreToolUse hook registration
+  --force       Backup foreign files, then replace with managed symlinks
   -h, --help    Show this help
 
 Install is idempotent. Symlinks point into this repo; settings.json is edited
 with python3 (backed up to settings.json.grokdrive.bak before the first edit).
+
+After install: START A FRESH Claude Code session (hooks load at session start).
 EOF
 }
 
@@ -57,6 +62,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "install.sh: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -118,12 +124,29 @@ safe_symlink() {
       run "ln -s $(printf %q "$src") $(printf %q "$dst")"
       return 0
     fi
-    echo "  WARN: $dst exists and points elsewhere; skip (not clobbering)" >&2
+    if [[ "${FORCE:-0}" -eq 1 ]]; then
+      local bak="${dst}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+      log "  backup: $dst -> $bak"
+      run "mv $(printf %q "$dst") $(printf %q "$bak")"
+      log "  ln -s $src $dst"
+      run "ln -s $(printf %q "$src") $(printf %q "$dst")"
+      return 0
+    fi
+    echo "  WARN: $dst exists and points elsewhere; skip (use --force)" >&2
     return 0
   fi
 
   if [[ -e "$dst" ]]; then
-    echo "  WARN: $dst exists and is not a symlink; skip (not clobbering)" >&2
+    if [[ "${FORCE:-0}" -eq 1 ]]; then
+      local bak="${dst}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+      log "  backup: $dst -> $bak"
+      run "mv $(printf %q "$dst") $(printf %q "$bak")"
+      log "  ln -s $src $dst"
+      run "mkdir -p $(printf %q "$dst_dir")"
+      run "ln -s $(printf %q "$src") $(printf %q "$dst")"
+      return 0
+    fi
+    echo "  WARN: $dst exists and is not a symlink; skip (use --force)" >&2
     return 0
   fi
 

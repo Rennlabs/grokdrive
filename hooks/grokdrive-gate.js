@@ -91,7 +91,15 @@ function allowedPath(fp) {
   return false;
 }
 
-function deny(reason) {
+function audit(row) {
+  try {
+    const line = JSON.stringify(Object.assign({ ts: new Date().toISOString() }, row)) + '\n';
+    fs.appendFileSync(path.join(STATE_DIR, 'audit.jsonl'), line);
+  } catch (_) { /* never fail closed on audit */ }
+}
+
+function deny(reason, meta) {
+  audit(Object.assign({ type: 'deny', reason: String(reason).slice(0, 200) }, meta || {}));
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -143,7 +151,12 @@ process.stdin.on('end', () => {
 
     if (TRIVIAL_LINES > 0 && changedLines(tool, ti) <= TRIVIAL_LINES) process.exit(0);
 
-    deny(denyMsg(tool, fp, state.advisor || 'opus', state.effort || 'auto'));
+    deny(denyMsg(tool, fp, state.advisor || 'opus', state.effort || 'auto'), {
+      tool: tool,
+      path: fp,
+      session: sid,
+      advisor: state.advisor || 'opus',
+    });
   } catch (_) {
     process.exit(0); // never wedge a tool call on a hook bug
   }

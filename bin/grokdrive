@@ -15,24 +15,43 @@
 #   grokdrive parallel "A" "B" "C"    # fan out independent bodies, collect
 #   grokdrive verify --gate "<cmd>" [--loop <mode>]   # external gate -> verdict marker
 #   grokdrive doctor                  # grok on PATH, state writable, hook installed
+#   grokdrive log [-n N]              # recent gate audit + dispatches
+#   grokdrive explain                 # what the gate would block (not a sandbox)
+#   grokdrive version
 #
 # Effort: the user asked for "Grok 4.5 high and medium" — `auto` (default) picks
 #   HIGH for large/complex specs and MEDIUM for standard ones; never LOW unless asked.
 # Env: GROKDRIVE_EFFORT, GROKDRIVE_MODEL (empty = grok default 4.5), GROKDRIVE_MAX_TURNS,
-#   GROKDRIVE_TIMEOUT, GROKDRIVE_SANDBOX, GROKDRIVE_STATE_DIR, GROKDRIVE_SESSION.
+#   GROKDRIVE_TIMEOUT, GROKDRIVE_SANDBOX, GROKDRIVE_STATE_DIR, GROKDRIVE_SESSION,
+#   GROKDRIVE_ALWAYS_APPROVE (default 1 — Grok headless needs --always-approve; set 0 to refuse).
 # Kill-switch for the gate: CLAUDE_GUARDS_OFF=1  (or just `grokdrive off`).
+#
+# NOT A SANDBOX: Bash/MCP/subagent writes still work. Gate only blocks Claude Write/Edit tools.
 set -uo pipefail
+
+_GD_SRC="${BASH_SOURCE[0]}"
+while [[ -L "$_GD_SRC" ]]; do
+  _GD_DIR="$(cd -P "$(dirname "$_GD_SRC")" && pwd)"
+  _GD_SRC="$(readlink "$_GD_SRC")"
+  [[ "$_GD_SRC" != /* ]] && _GD_SRC="$_GD_DIR/$_GD_SRC"
+done
+_GD_ROOT="$(cd -P "$(dirname "$_GD_SRC")/.." && pwd)"
+unset _GD_SRC _GD_DIR
+GROKDRIVE_VERSION="$(tr -d ' \n' <"$_GD_ROOT/VERSION" 2>/dev/null || echo "0.1.0")"
 
 STATE_DIR="${GROKDRIVE_STATE_DIR:-$HOME/.claude/.grokdrive-state}"
 SESSION="${GROKDRIVE_SESSION:-${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-global}}}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
+AUDIT_LOG="$STATE_DIR/audit.jsonl"
 
 DEFAULT_EFFORT="${GROKDRIVE_EFFORT:-auto}"
 MAX_TURNS="${GROKDRIVE_MAX_TURNS:-60}"
 MODEL="${GROKDRIVE_MODEL:-}"
 SANDBOX="${GROKDRIVE_SANDBOX:-}"
 TIMEOUT="${GROKDRIVE_TIMEOUT:-1200}"
+ALWAYS_APPROVE="${GROKDRIVE_ALWAYS_APPROVE:-1}"
 HOOK_FILE="$HOME/.claude/hooks/grokdrive-gate.js"
+SETTINGS_FILE="$HOME/.claude/settings.json"
 
 _now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _stamp() { date -u +%Y%m%dT%H%M%SZ; }
@@ -107,10 +126,37 @@ json.dump(d,open(f,"w"),indent=1)
 PY
 }
 
+_audit() { # type key=val...
+  local typ="$1"; shift
+  GD_TYPE="$typ" GD_TS="$(_now)" GD_SESSION="$SESSION" GD_EXTRA="$*" python3 - "$AUDIT_LOG" 2>/dev/null <<'PY' || true
+import json,os,sys
+path=sys.argv[1]
+row={"ts":os.environ["GD_TS"],"type":os.environ["GD_TYPE"],"session":os.environ["GD_SESSION"]}
+extra=os.environ.get("GD_EXTRA","").strip()
+if extra:
+    for part in extra.split():
+        if "=" in part:
+            k,v=part.split("=",1); row[k]=v
+open(path,"a").write(json.dumps(row)+"\n")
+PY
+}
+
+_boundary_banner() {
+  cat <<'EOF'
+  BOUNDARY (not a sandbox):
+    GATE stops: Claude Write / Edit / MultiEdit / NotebookEdit on project files
+    GATE does NOT stop: Bash writes, MCP writes, sub-agent writes, or Grok itself
+  Dispatches use Grok --always-approve (headless). Set GROKDRIVE_ALWAYS_APPROVE=0 to refuse.
+EOF
+}
+
 # ---------------------------------------------------------------- dispatch core
 _dispatch() { # <effort> <label>  (prompt via $PROMPT text or $PROMPT_FILE)
   local effort="$1" label="$2"
   _have grok || _die "grok (Grok Build CLI) not on PATH"
+  if [[ "$ALWAYS_APPROVE" != "1" && "$ALWAYS_APPROVE" != "true" && "$ALWAYS_APPROVE" != "yes" ]]; then
+    _die "GROKDRIVE_ALWAYS_APPROVE is off — refusing headless Grok dispatch (set GROKDRIVE_ALWAYS_APPROVE=1 to allow --always-approve)"
+  fi
   local args=(--output-format plain --always-approve --max-turns "$MAX_TURNS" --effort "$effort")
   [[ -n "$MODEL" ]] && args+=(-m "$MODEL")
   [[ -n "$SANDBOX" ]] && args+=(--sandbox "$SANDBOX")
@@ -120,9 +166,10 @@ _dispatch() { # <effort> <label>  (prompt via $PROMPT text or $PROMPT_FILE)
   adir="$(_artifact_dir)"; art="$adir/$(_stamp)-${label}.md"; err="$(mktemp)"
   {
     echo "# grokdrive dispatch — $(_now)"
-    echo "effort=$effort model=${MODEL:-<grok-default>} max_turns=$MAX_TURNS cwd=$PWD"
+    echo "effort=$effort model=${MODEL:-<grok-default>} max_turns=$MAX_TURNS cwd=$PWD always_approve=yes"
     echo "---"
   } >"$art"
+  _audit dispatch effort="$effort" label="$label" artifact="$art"
   # run grok; tee stdout into the artifact
   if timeout "$TIMEOUT" grok "${args[@]}" </dev/null 2>"$err" | tee -a "$art"; then rc=0; else rc=${PIPESTATUS[0]}; fi
   if [[ $rc -eq 124 || $rc -eq 137 ]]; then
@@ -158,10 +205,17 @@ cmd_on() {
  "dispatches": 0
 }
 JSON
-  echo "grokdrive: ON ($scope) — advisor=$advisor, effort=$effort"
+  echo "grokdrive: ON ($scope) — advisor=$advisor, effort=$effort  (v$GROKDRIVE_VERSION)"
   echo "  Execution + heavy sub-agents now route to Grok 4.5. Claude ($advisor) is advisor/orchestrator."
   echo "  Direct Claude Write/Edit is hard-gated (trivial <=${GROKDRIVE_TRIVIAL_LINES:-20}-line edits still pass)."
+  _boundary_banner
   [[ -f "$HOOK_FILE" ]] || echo "  ⚠ gate hook missing: $HOOK_FILE (run: grokdrive doctor)"
+  if ! grep -q "grokdrive-gate.js" "$SETTINGS_FILE" 2>/dev/null; then
+    echo "  ⚠ gate not registered in settings.json — run ./install.sh then START A FRESH Claude Code session"
+  else
+    echo "  Note: PreToolUse hooks load at session start. If you just installed, restart Claude Code."
+  fi
+  _audit on scope="$scope" effort="$effort" advisor="$advisor"
 }
 
 cmd_off() {
@@ -183,11 +237,60 @@ cmd_off() {
 }
 
 cmd_status() {
-  local f; if f="$(_active_state)"; then
-    echo "grokdrive: ACTIVE"; cat "$f"
+  echo "grokdrive $GROKDRIVE_VERSION  session=$SESSION"
+  local f
+  if f="$(_active_state)"; then
+    echo "state: ACTIVE"
+    cat "$f"
   else
-    echo "grokdrive: inactive (session=$SESSION)"
+    echo "state: inactive"
   fi
+  echo "--- boundary ---"
+  _boundary_banner
+  printf 'hook file: %s\n' "$( [[ -f "$HOOK_FILE" ]] && echo OK || echo MISSING )"
+  printf 'settings:  %s\n' "$( grep -q grokdrive-gate.js "$SETTINGS_FILE" 2>/dev/null && echo registered || echo NOT_REGISTERED )"
+  printf 'always-approve default: %s\n' "$ALWAYS_APPROVE"
+  printf 'guards off: %s\n' "${CLAUDE_GUARDS_OFF:-0}"
+  if [[ -f "$AUDIT_LOG" ]]; then
+    echo "--- last dispatches ---"
+    tail -n 5 "$AUDIT_LOG" 2>/dev/null || true
+  fi
+}
+
+cmd_explain() {
+  cat <<EOF
+grokdrive explain (v$GROKDRIVE_VERSION)
+
+When ACTIVE (grokdrive on), the PreToolUse hook blocks Claude tools:
+  Write | Edit | MultiEdit | NotebookEdit
+on non-allowlisted paths (project files). Allowlisted: ~/.claude/**, ~/.local/bin/**, /tmp/claude-*.
+
+NOT blocked (by design — this is NOT a sandbox):
+  Bash, Read, Grep, Glob, MCP tools, sub-agents writing files, or Grok after dispatch.
+
+Escape hatches:
+  grokdrive off
+  CLAUDE_GUARDS_OFF=1
+  trivial edits <= ${GROKDRIVE_TRIVIAL_LINES:-20} lines (GROKDRIVE_TRIVIAL_LINES=0 for hard gate)
+
+Dispatch always passes Grok --always-approve when GROKDRIVE_ALWAYS_APPROVE=1 (default).
+Set GROKDRIVE_ALWAYS_APPROVE=0 to refuse dispatches.
+
+Install caveat: hooks load only at Claude Code session start. After install.sh, start a new session.
+EOF
+}
+
+cmd_log() {
+  local n=20
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -n) n="${2:-20}"; shift 2;;
+    *) shift;;
+  esac; done
+  if [[ ! -f "$AUDIT_LOG" ]]; then
+    echo "no audit log yet ($AUDIT_LOG)"
+    return 0
+  fi
+  tail -n "$n" "$AUDIT_LOG"
 }
 
 cmd_run() {
@@ -254,12 +357,17 @@ PY
 
 cmd_doctor() {
   local ok=1
+  echo "grokdrive doctor $GROKDRIVE_VERSION"
   printf '%-28s' "grok (Grok Build CLI):"; if _have grok; then echo "OK ($(command -v grok))"; else echo "MISSING"; ok=0; fi
   printf '%-28s' "state dir writable:"; if touch "$STATE_DIR/.w" 2>/dev/null && rm -f "$STATE_DIR/.w"; then echo "OK ($STATE_DIR)"; else echo "FAIL"; ok=0; fi
   printf '%-28s' "gate hook file:"; if [[ -f "$HOOK_FILE" ]]; then echo "OK"; else echo "MISSING ($HOOK_FILE)"; ok=0; fi
-  printf '%-28s' "gate hook registered:"; if grep -q "grokdrive-gate.js" "$HOME/.claude/settings.json" 2>/dev/null; then echo "OK (settings.json PreToolUse)"; else echo "NOT REGISTERED"; ok=0; fi
+  printf '%-28s' "gate hook registered:"; if grep -q "grokdrive-gate.js" "$SETTINGS_FILE" 2>/dev/null; then echo "OK (settings.json PreToolUse)"; else echo "NOT REGISTERED — run ./install.sh"; ok=0; fi
   printf '%-28s' "session id:"; echo "$SESSION"
   printf '%-28s' "effort default:"; echo "$DEFAULT_EFFORT (auto => high|medium)"
+  printf '%-28s' "always-approve:"; echo "$ALWAYS_APPROVE (set GROKDRIVE_ALWAYS_APPROVE=0 to refuse)"
+  printf '%-28s' "session restart:"; echo "REQUIRED after first install (hooks load at session start)"
+  echo "--- boundary ---"
+  _boundary_banner
   [[ $ok -eq 1 ]] && { echo "doctor: PASS"; return 0; } || { echo "doctor: FAIL"; return 1; }
 }
 
@@ -274,8 +382,11 @@ main() {
     parallel|par) shift; cmd_parallel "$@";;
     verify)   shift; cmd_verify "$@";;
     doctor|dr) cmd_doctor;;
+    log)      shift; cmd_log "$@";;
+    explain)  cmd_explain;;
+    version|-V|--version) echo "grokdrive $GROKDRIVE_VERSION";;
     ""|-h|--help|help)
-      sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//';;
+      sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//';;
     *)        cmd_run "$@";;   # bare: treat all args as a run spec
   esac
 }
